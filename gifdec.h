@@ -3,6 +3,7 @@
 #include <vector>
 #include <math.h>
 #include <bitset>
+#include <iterator>
 
 typedef struct GifHeader
 {
@@ -17,7 +18,9 @@ typedef struct GifHeader
 
 typedef struct ApplicationExtension
 {
-
+    uint8_t applicationIdentifier[8];
+    uint8_t applicationAuthCode[3];
+    std::vector<uint8_t> applicationData;
 };
 
 typedef struct CommentExtension
@@ -27,10 +30,12 @@ typedef struct CommentExtension
 
 typedef struct GraphicControlExtension
 {
-
+    uint8_t packedFields;
+    uint16_t delayTime;
+    uint8_t transparentColorIndex;
 };
 
-typedef struct GlobalColorTable
+struct GlobalColorTable
 {
     uint8_t* red;
     uint8_t* green;
@@ -87,20 +92,31 @@ void get_colortable(std::ifstream* ifs, GlobalColorTable* gct, uint8_t gctSize)
     delete[] buffer;
 }
 
-void get_appextension(std::ifstream* ifs)
+ApplicationExtension get_appextension(std::ifstream* ifs)
 {
     unsigned char c[1];
+    ApplicationExtension appExtension;
     ifs->read((char*)c, 1);
-    char appIdentifier[8];
-    char appAuthCode[3];
-    ifs->read(appIdentifier, 8);
-    ifs->read(appAuthCode, 3);
+    ifs->read(reinterpret_cast<char*>(&appExtension.applicationIdentifier), 8);
+    ifs->read(reinterpret_cast<char*>(&appExtension.applicationAuthCode), 3);
     ifs->read((char*)c, 1);
-    std::cout << ifs->tellg();
-    if((int)c[0] > 1)
+    while(c[0] != 0x0)
     {
-        char
+        unsigned char buffer[c[0]];
+        ifs->read((char *) buffer, c[0]);
+        appExtension.applicationData.insert(appExtension.applicationData.end(), buffer, buffer + c[0]);
+        ifs->read((char*)c, 1);
     }
+    return appExtension;
+}
+
+void get_graphicextension(std::ifstream* ifs, GraphicControlExtension* gce)
+{
+    ifs->ignore();
+    ifs->read(reinterpret_cast<char*>(&gce->packedFields), 1);
+    ifs->read(reinterpret_cast<char*>(&gce->delayTime), 2);
+    ifs->read(reinterpret_cast<char*>(&gce->transparentColorIndex), 1);
+    ifs->ignore();
 }
 
 void file_handle(std::string fileName)
@@ -109,6 +125,8 @@ void file_handle(std::string fileName)
     std::ifstream ifs;
     GifHeader header;
     GlobalColorTable gct;
+    GraphicControlExtension gce;
+    std::vector<ApplicationExtension> appExtensions;
     ifs.open(fileName, std::ios::binary);
 
     ifs.seekg(0, std::ios_base::end);
@@ -122,16 +140,29 @@ void file_handle(std::string fileName)
         std::cout << "yes" << '\n';
         get_colortable(&ifs, &gct, header.packedFields & 0x7);
     }
-    unsigned char c[2];
-    ifs.read((char*)c, 2);
-    if(c[0] == 0x21)
+    while(ifs.tellg() != size)
     {
-
-        switch(c[1])
+        uint8_t c;
+        ifs.read((char*)&c, 1);
+        std::cout << std::hex << (int)c << '\n';
+        char debug;
+        std::cin >> debug;
+        if(c == 0x21)
         {
-            case 0xff:
-                get_appextension(&ifs);
-            break;
+            ifs.read((char*)&c, 1);
+            if(c == 0xff)
+            {
+                ApplicationExtension temp = get_appextension(&ifs);
+                appExtensions.emplace_back(temp);
+            }
+            else if(c == 0xf9)
+            {
+                get_graphicextension(&ifs, &gce);
+            }
+        }
+        else if(c == 0x2c)
+        {
+
         }
     }
     ifs.close();
